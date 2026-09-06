@@ -132,6 +132,32 @@ jobs:
           prerelease: false
           generate_release_notes: true
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}          fi
+          ASSET_NAME="XML-Video-Editor-${VERSION_TAG}-debug.apk"
+          cp "$APK_FILE" "release-assets/${ASSET_NAME}"
+          echo "tag_name=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
+          echo "asset_path=release-assets/${ASSET_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-debug-apk
+          path: release-assets/*.apk
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: success() && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch')
+        with:
+          tag_name: ${{ steps.prepare_asset.outputs.tag_name }}
+          name: Release ${{ steps.prepare_asset.outputs.tag_name }}
+          files: ${{ steps.prepare_asset.outputs.asset_path }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}          ASSET_NAME="XML-Video-Editor-${VERSION_TAG}-debug.apk"
           cp "$APK_FILE" "release-assets/${ASSET_NAME}"
           echo "tag_name=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
