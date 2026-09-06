@@ -59,7 +59,7 @@ jobs:
 
       - name: Build Debug APK
         run: |
-          # 1. Detect project directory (either root or inside a subfolder like Xml-main)
+          # 1. Detect project directory
           PROJECT_DIR="."
           if [ ! -f "settings.gradle.kts" ] && [ ! -f "settings.gradle" ]; then
             FOUND=$(find . -name "settings.gradle.kts" -o -name "settings.gradle" | head -n 1)
@@ -70,7 +70,7 @@ jobs:
           echo "Project directory: $PROJECT_DIR"
           cd "$PROJECT_DIR"
 
-          # 2. Ensure environment secrets and keystore exist in project dir
+          # 2. Ensure secrets and keystore exist
           [ ! -f ".env" ] && ([ -f ".env.example" ] && cp .env.example .env || touch .env)
           if [ -f "debug.keystore.base64" ] && [ ! -f "debug.keystore" ]; then
             base64 -d debug.keystore.base64 > debug.keystore
@@ -79,9 +79,9 @@ jobs:
             keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-          # 3. Ensure gradlew exists; if not, generate it or use installed gradle
+          # 3. Ensure gradlew wrapper exists
           if [ ! -f "./gradlew" ]; then
-            echo "gradlew not found, generating wrapper..."
+            echo "Generating gradlew wrapper..."
             gradle wrapper || true
           fi
 
@@ -108,6 +108,31 @@ jobs:
             VERSION_TAG="v1.0.${GITHUB_RUN_NUMBER}"
           fi
           ASSET_NAME="XML-Video-Editor-${VERSION_TAG}-debug.apk"
+          cp "$APK_FILE" "release-assets/${ASSET_NAME}"
+          echo "tag_name=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
+          echo "asset_path=release-assets/${ASSET_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-debug-apk
+          path: release-assets/*.apk
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: success() && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch')
+        with:
+          tag_name: ${{ steps.prepare_asset.outputs.tag_name }}
+          name: Release ${{ steps.prepare_asset.outputs.tag_name }}
+          files: ${{ steps.prepare_asset.outputs.asset_path }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}          ASSET_NAME="XML-Video-Editor-${VERSION_TAG}-debug.apk"
           cp "$APK_FILE" "release-assets/${ASSET_NAME}"
           echo "tag_name=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
           echo "asset_path=release-assets/${ASSET_NAME}" >> "$GITHUB_OUTPUT"
