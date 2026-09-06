@@ -59,31 +59,67 @@ jobs:
 
       - name: Build Debug APK
         run: |
-          chmod +x gradlew || true
-          ./gradlew :app:assembleDebug -Dorg.gradle.configuration-cache=false -Dorg.gradle.daemon=false --stacktrace
+          # 1. Detect project directory (either root or inside a subfolder like Xml-main)
+          PROJECT_DIR="."
+          if [ ! -f "settings.gradle.kts" ] && [ ! -f "settings.gradle" ]; then
+            FOUND=$(find . -name "settings.gradle.kts" -o -name "settings.gradle" | head -n 1)
+            if [ -n "$FOUND" ]; then
+              PROJECT_DIR=$(dirname "$FOUND")
+            fi
+          fi
+          echo "Project directory: $PROJECT_DIR"
+          cd "$PROJECT_DIR"
 
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: app-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: warn
-          retention-days: 30
+          # 2. Ensure environment secrets and keystore exist in project dir
+          [ ! -f ".env" ] && ([ -f ".env.example" ] && cp .env.example .env || touch .env)
+          if [ -f "debug.keystore.base64" ] && [ ! -f "debug.keystore" ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          fi
+          if [ ! -f "debug.keystore" ]; then
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+          # 3. Ensure gradlew exists; if not, generate it or use installed gradle
+          if [ ! -f "./gradlew" ]; then
+            echo "gradlew not found, generating wrapper..."
+            gradle wrapper || true
+          fi
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew :app:assembleDebug -Dorg.gradle.configuration-cache=false -Dorg.gradle.daemon=false --stacktrace
+          else
+            gradle :app:assembleDebug -Dorg.gradle.configuration-cache=false -Dorg.gradle.daemon=false --stacktrace
+          fi
 
       - name: Prepare Release Asset
         id: prepare_asset
         if: success()
         run: |
           mkdir -p release-assets
+          APK_FILE=$(find . -type f -name "*-debug.apk" -o -name "app-debug.apk" | head -n 1)
+          if [ -z "$APK_FILE" ]; then
+            echo "ERROR: APK file not found!"
+            exit 1
+          fi
+          echo "Found APK: $APK_FILE"
           VERSION_TAG="${GITHUB_REF_NAME:-v1.0.${GITHUB_RUN_NUMBER}}"
           if [[ "$GITHUB_REF" != refs/tags/* ]]; then
             VERSION_TAG="v1.0.${GITHUB_RUN_NUMBER}"
           fi
           ASSET_NAME="XML-Video-Editor-${VERSION_TAG}-debug.apk"
-          cp app/build/outputs/apk/debug/*.apk "release-assets/${ASSET_NAME}"
+          cp "$APK_FILE" "release-assets/${ASSET_NAME}"
           echo "tag_name=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
           echo "asset_path=release-assets/${ASSET_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-debug-apk
+          path: release-assets/*.apk
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
